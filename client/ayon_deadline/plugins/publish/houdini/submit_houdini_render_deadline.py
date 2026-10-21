@@ -443,9 +443,10 @@ class HoudiniSubmitDeadlineUsdRender(HoudiniSubmitDeadline):
         return
 
     def _submit_split_render_jobs(self, instance, job_id, job_info):
-        """One render job per tile when the ROP renders tiles without
-        stitching them, then one job per render product that stitches each
-        frame as soon as its tiles are rendered.
+        """Render the tiles when the ROP renders them without stitching them:
+        one Deadline tile job for a single frame, else one job per tile. Then
+        one job per render product stitches each frame once its tiles are
+        rendered.
         """
         plugin_info = self.get_plugin_info(job_type="render")
         tile_count = plugin_info["TilesX"] * plugin_info["TilesY"]
@@ -456,21 +457,40 @@ class HoudiniSubmitDeadlineUsdRender(HoudiniSubmitDeadline):
         auth = instance.data["deadline"]["auth"]
         verify = instance.data["deadline"]["verify"]
         dependency_job_ids = [job_id] if job_id else []
+        frame = instance.data["frameStartHandle"]
+        single_frame = frame == instance.data["frameEndHandle"]
 
-        tile_job_ids = []
-        for tile_index in range(tile_count):
+        if single_frame:
+            # A Deadline tile job, one task per tile. Its tasks are tiles, not
+            # frames, so it waits for the whole export job.
             tile_job_info = self.get_job_info(
                 job_info=deepcopy(job_info),
                 dependency_job_ids=dependency_job_ids,
                 use_dcc_plugin=False,
             )
-            tile_job_info.Name += " (tile {}/{})".format(
-                tile_index + 1, tile_count)
+            tile_job_info.TileJob = True
+            tile_job_info.TileJobFrame = int(frame)
+            tile_job_info.TileJobTilesInX = plugin_info["TilesX"]
+            tile_job_info.TileJobTilesInY = plugin_info["TilesY"]
+            tile_job_info.IsFrameDependent = False
             payload = self.assemble_payload(
-                job_info=tile_job_info,
-                plugin_info=dict(plugin_info, TileIndex=tile_index),
-            )
-            tile_job_ids.append(self.submit(payload, auth, verify))
+                job_info=tile_job_info, plugin_info=plugin_info)
+            tile_job_ids = [self.submit(payload, auth, verify)]
+        else:
+            tile_job_ids = []
+            for tile_index in range(tile_count):
+                tile_job_info = self.get_job_info(
+                    job_info=deepcopy(job_info),
+                    dependency_job_ids=dependency_job_ids,
+                    use_dcc_plugin=False,
+                )
+                tile_job_info.Name += " (tile {}/{})".format(
+                    tile_index + 1, tile_count)
+                payload = self.assemble_payload(
+                    job_info=tile_job_info,
+                    plugin_info=dict(plugin_info, TileIndex=tile_index),
+                )
+                tile_job_ids.append(self.submit(payload, auth, verify))
         self.log.info("Tile job ids: %s", tile_job_ids)
 
         # itilestitch makes one image per call: one stitch job per product.
@@ -483,7 +503,7 @@ class HoudiniSubmitDeadlineUsdRender(HoudiniSubmitDeadline):
             )
             stitch_job_info.Name = stitch_job_info.Name.replace(
                 "[RENDER]", "[STITCH]")
-            stitch_job_info.IsFrameDependent = True
+            stitch_job_info.IsFrameDependent = not single_frame
             stitch_job_info.ChunkSize = 1
             stitch_job_info.OutputDirectory.clear()
             stitch_job_info.OutputFilename.clear()
