@@ -72,6 +72,10 @@ class HuskStandalonePluginInfo:
     RestartDelegate: str = field(default="")
     Version: str = field(default="")
     SlapCompSources: str = field(default="")
+    AutoTile: bool = field(default=False)
+    TilesX: int = field(default=0)
+    TilesY: int = field(default=0)
+    AutoTileRes: str = field(default="")
 
 
 class HoudiniSubmitDeadline(
@@ -371,6 +375,20 @@ class HoudiniSubmitDeadline(
         # Instance data comes from `CollectSlapComps` plugin in Houdini addon.
         slapcomps: "list[str]" = instance.data.get("slapComp", [])
 
+        # Render All Tiles and Stitch Final Image, Houdini 21+.
+        # Like the ROP, pass nothing when Tiled Render is off.
+        auto_tile = bool(
+            rop_node.evalParm("husk_tile")
+            and rop_node.parm("husk_autotile")
+            and rop_node.evalParm("husk_autotile")
+        )
+        tiles_x = tiles_y = 0
+        auto_tile_res = ""
+        if auto_tile:
+            tiles_x, tiles_y = rop_node.evalParmTuple("husk_tilecount")
+            auto_tile_res = "{} {}".format(
+                *rop_node.evalParmTuple("husk_tilemaxres"))
+
         return HuskStandalonePluginInfo(
             SceneFile=instance.data["ifdFile"],
             Renderer=rop_node.evalParm("renderer"),
@@ -385,7 +403,11 @@ class HoudiniSubmitDeadline(
             PostRender=rop_node.evalParm("husk_postrender"),
             RestartDelegate=restart_delegate,
             Version=hou_major_minor,
-            SlapCompSources="\n".join(slapcomps)
+            SlapCompSources="\n".join(slapcomps),
+            AutoTile=auto_tile,
+            TilesX=tiles_x,
+            TilesY=tiles_y,
+            AutoTileRes=auto_tile_res,
         )
 
     def _get_families(self, instance: pyblish.api.Instance) -> "set[str]":
