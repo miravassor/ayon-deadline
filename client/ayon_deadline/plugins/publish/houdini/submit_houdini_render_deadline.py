@@ -449,7 +449,7 @@ class HoudiniSubmitDeadlineUsdRender(HoudiniSubmitDeadline):
         """
         plugin_info = self.get_plugin_info(job_type="render")
         tile_count = plugin_info["TilesX"] * plugin_info["TilesY"]
-        if plugin_info["AutoTile"] or not tile_count:
+        if plugin_info["AutoTile"] or tile_count < 2:
             super()._submit_split_render_jobs(instance, job_id, job_info)
             return
 
